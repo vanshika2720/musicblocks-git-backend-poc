@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Music Blocks Git Backend – PoC Demo</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #0f1117;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: #fff;
+        }
+
+        .subtitle {
+            font-size: 0.875rem;
+            color: #888;
+            margin-bottom: 32px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .card {
+            background: #1a1d27;
+            border: 1px solid #2a2d3a;
+            border-radius: 10px;
+            padding: 20px;
+        }
+
+        .card h2 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #a78bfa;
+        }
+
+        .card p {
+            font-size: 0.8rem;
+            color: #999;
+            margin-bottom: 14px;
+            line-height: 1.5;
+        }
+
+        button {
+            background: #7c3aed;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+
+        button:hover { background: #6d28d9; }
+        button.secondary {
+            background: #374151;
+        }
+        button.secondary:hover { background: #4b5563; }
+
+        pre {
+            background: #0d0f18;
+            border: 1px solid #2a2d3a;
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 0.78rem;
+            overflow-x: auto;
+            margin-top: 12px;
+            color: #86efac;
+            white-space: pre-wrap;
+            min-height: 60px;
+            line-height: 1.6;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+        .badge-green { background: #14532d; color: #86efac; }
+        .badge-yellow { background: #713f12; color: #fde68a; }
+        .badge-red { background: #7f1d1d; color: #fca5a5; }
+
+        #status-bar {
+            font-size: 0.78rem;
+            color: #888;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Music Blocks Git Backend — Part 2 PoC</h1>
+<p class="subtitle">Three demos: scaling cache, planet migration, and git education triggers.</p>
+
+<div id="status-bar">checking server status...</div>
+
+<div class="grid">
+
+    <!-- DEMO 1: Cache Benchmark -->
+    <div class="card">
+        <h2>Demo 1 – Scaling: Cache Benchmark</h2>
+        <p>Calls <code>/api/demo/allRepos</code> and shows response time. First call hits the "GitHub API" (simulated 320ms delay). Second call is served from cache in ~5ms.</p>
+        <button onclick="fetchRepos()">Fetch All Repos</button>
+        <button class="secondary" onclick="clearCache()">Clear Cache</button>
+        <pre id="cache-output">press "Fetch All Repos" twice to see the difference</pre>
+    </div>
+
+    <!-- DEMO 2: Migration -->
+    <div class="card">
+        <h2>Demo 2 – Migration: SHA256 Deduplication</h2>
+        <p>Sends a batch of Planet IDs to <code>/api/migrate/planet</code>. On the second run, the content hash check catches the duplicate and returns <code>"skipped"</code>.</p>
+        <button onclick="runMigration()">Run Migration Batch</button>
+        <pre id="migrate-output">results will appear here</pre>
+    </div>
+
+    <!-- DEMO 3: Education -->
+    <div class="card">
+        <h2>Demo 3 – Education: Tutorial Triggers</h2>
+        <p>Simulates a student clicking Save. On the first click the tutorial fires (<code>first_save</code>). Subsequent saves just increment the streak.</p>
+        <button onclick="recordSave()">Student Clicks Save</button>
+        <button onclick="checkProgress()">Check Progress</button>
+        <button class="secondary" onclick="resetStudent()">Reset Student</button>
+        <pre id="edu-output">press "Student Clicks Save" to start</pre>
+    </div>
+
+</div>
+
+<script>
+    const STUDENT_ID = "demo-student-1";
+
+    async function checkStatus() {
+        try {
+            const r = await fetch("/api/status");
+            const d = await r.json();
+            document.getElementById("status-bar").textContent =
+                `server ok · cache: ${d.cache} · ${d.timestamp}`;
+        } catch {
+            document.getElementById("status-bar").textContent = "server not responding";
+        }
+    }
+
+    async function fetchRepos() {
+        const out = document.getElementById("cache-output");
+        out.textContent = "fetching...";
+        const start = performance.now();
+        const r = await fetch("/api/demo/allRepos");
+        const d = await r.json();
+        const clientMs = Math.round(performance.now() - start);
+        out.textContent = JSON.stringify({
+            source: d.source,
+            serverSideMs: d.responseTimeMs,
+            totalRoundTripMs: clientMs,
+            repos: d.data
+        }, null, 2);
+    }
+
+    async function clearCache() {
+        await fetch("/api/demo/allRepos/cache", { method: "DELETE" });
+        document.getElementById("cache-output").textContent = "cache cleared — fetch again to see the full delay";
+    }
+
+    async function runMigration() {
+        const out = document.getElementById("migrate-output");
+        out.textContent = "migrating...";
+        // using fake planet IDs for the demo - in real use these come from the student's key
+        const r = await fetch("/api/migrate/planet", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                planetIds: ["planet-proj-001", "planet-proj-002"],
+                ownerKey: "demo-owner-key-abc123"
+            })
+        });
+        const d = await r.json();
+        out.textContent = JSON.stringify(d, null, 2);
+    }
+
+    async function recordSave() {
+        const out = document.getElementById("edu-output");
+        const r = await fetch("/api/demo/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ studentId: STUDENT_ID })
+        });
+        const d = await r.json();
+        let text = `streak: ${d.streak}`;
+        if (d.tutorialMoment) {
+            text += `\n\ntutorial fired: "${d.tutorialMoment}"\n→ "You just made your first commit! Think of it as a snapshot in your project's photo album."`;
+        } else {
+            text += "\n\n(no tutorial - student has already seen first_save)";
+        }
+        out.textContent = text;
+    }
+
+    async function checkProgress() {
+        const out = document.getElementById("edu-output");
+        const r = await fetch(`/api/demo/tutorials/${STUDENT_ID}`);
+        const d = await r.json();
+        out.textContent = JSON.stringify(d, null, 2);
+    }
+
+    async function resetStudent() {
+        await fetch(`/api/demo/tutorials/${STUDENT_ID}`, { method: "DELETE" });
+        document.getElementById("edu-output").textContent = "student state reset — click Save again to retrigger the tutorial";
+    }
+
+    checkStatus();
+</script>
+
+</body>
+</html>
